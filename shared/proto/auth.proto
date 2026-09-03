@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "go-task-wallet-service/shared/proto/impl/auth;authpb";
+
+service AuthService {
+  rpc RegisterUser(RegisterUserRequest) returns (RegisterUserResponse);
+  rpc LoginUser(LoginUserRequest) returns (LoginUserResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+}
+
+message RegisterUserRequest { string name = 1; string username = 2; string email = 3; string password = 4; string id = 5; }
+
+message RegisterUserResponse { string id = 1; string accessToken = 2; }
+
+message LoginUserRequest { string username = 1; string password = 2; }
+
+message LoginUserResponse { string accessToken = 1; string id = 2; }
+
+message RefreshTokenRequest {string refreshToken = 1; string userId = 2;}
+
+message RefreshTokenResponse { string refreshToken = 1; string userId = 2;}

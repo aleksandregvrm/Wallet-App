@@ -1,0 +1,11 @@
+root = "."
+tmp_dir = "tmp/api-gateway"
+
+[build]
+  cmd = "go build -o ./tmp/api-gateway/main ./api-gateway/cmd"
+  bin = "tmp/api-gateway/main"
+  full_bin = "./tmp/api-gateway/main"
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  exclude_dir = ["tmp", "vendor", "testdata", "bin", "auth-service", "wallet-service", "node_modules"]
+  exclude_regex = ["_test.go"]
+  delay = 1000

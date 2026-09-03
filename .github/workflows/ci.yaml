@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+# Only step before merge that triggers all of the test scripts to be executed. Any failure will prevent the push or merge
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+       # Build step in case build failure occurs, it will prevent the push or merge. This is to ensure that the code is buildable before running tests.
+      - name: Build
+        run: make build
+
+      - name: Unit tests - api-gateway
+        run: make test-api-gateway-unit
+
+      - name: Unit tests - auth-service
+        run: make test-auth-service-unit
+
+      - name: Unit tests - wallet-service
+        run: make test-wallet-service-unit
+
+      - name: Integration tests - api-gateway
+        run: make test-api-gateway-integration
+
+      - name: Integration tests - auth-service
+        run: make test-auth-service-integration
+
+      - name: Integration tests - wallet-service
+        run: make test-wallet-service-integration
+
+      - name: Running test coverage
+        run: make test-coverage

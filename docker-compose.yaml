@@ -1,0 +1,270 @@
+services:
+  # One of our microservices api-gateway running(exposed) on port: 8080
+  # this ensures single source of entry since other services do not expose HTTP methods
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      HTTP_ADDR: ":8080"
+      AUTH_SERVICE_ADDR: "host.docker.internal:8081"
+      WALLET_SERVICE_ADDR: "host.docker.internal:8082"
+      ENV: "development"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--spider",
+          "-q",
+          "http://localhost:8080/health/liveness",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      wallet-service:
+        condition: service_healthy
+
+  # One of our microservices auth-service running(exposed) on port: 8081
+  # This service only exposes gRPC server on port 8081, It also connect to the PostgreSQL instance and Redis instance
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      GRPC_ADDR_AUTH: ":8081"
+      ENV: "development"
+      POSTGRES_DSN: "postgres://go_master:test@db:5432/go_master?sslmode=disable&pool_max_conns=30"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # One of our microservices wallet-service running(exposed) on port: 8082
+  # his service only exposes gRPC server on port 8082, It also connect to the PostgreSQL instance, Redis instance and Kafka
+  # It acts both as a consumer of messages and producer
+  wallet-service:
+    build:
+      context: .
+      dockerfile: wallet-service/Dockerfile
+    container_name: wallet-service
+    ports:
+      - "8082:8082"
+    environment:
+      GRPC_ADDR_WALLET: ":8082"
+      ENV: "development"
+      POSTGRES_DSN: "postgres://go_master:test@db:5432/go_master?sslmode=disable&pool_max_conns=30"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      KAFKA_BROKERS: "kafka:29092"
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:8082"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      topic-init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # Single-node Kafka broker
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092" # host access, e.g. tools running outside docker
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    # Kafka healthcheck endpoint. Essential for services to start running
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Web UI for Kafka: browse topics/partitions, inspect messages, watch
+  # consumer group lag (wallet.events.v1, wallet.events.v1.dlq, projector
+  # group, etc). Maintained continuation of the provectuslabs/kafka-ui project.
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: kafka-ui
+    profiles: ["dev"]
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      - kafka
+
+  # "Postman for gRPC" — invokes RPCs on a single target service via
+  # server reflection. Pointed at auth-service and wallet-service, which runs as a native host
+  # process (via air), not a container in this compose file — hence
+  # host.docker.internal rather than a service name. Matches GRPC_ADDR's
+  # default (:8081,8082) in auth-service/cmd/main.go and wallet-service/cmd/main.go which now also registers
+  # reflection so grpcui can discover exposed gRPC resolve ports.
+  grpcui-auth:
+    image: fullstorydev/grpcui:latest
+    container_name: grpcui-auth
+    profiles: ["dev"]
+    ports:
+      - "8091:8080"
+    command:
+      [
+        "-plaintext",
+        "-bind",
+        "0.0.0.0",
+        "-port",
+        "8080",
+        "host.docker.internal:8081",
+      ]
+    # This way we make sure the container restarts in case the auth-service couldn't boot up
+    depends_on:
+      - auth-service
+    restart: on-failure
+
+  grpcui-wallet:
+    image: fullstorydev/grpcui:latest
+    container_name: grpcui-wallet
+    profiles: ["dev"]
+    ports:
+      - "8092:8080"
+    command:
+      [
+        "-plaintext",
+        "-bind",
+        "0.0.0.0",
+        "-port",
+        "8080",
+        "host.docker.internal:8082",
+      ]
+    # This way we make sure the container restarts in case the wallet-service couldn't boot up
+    depends_on:
+      - wallet-service
+    restart: on-failure
+
+  # PostgreSQL instance for local development
+  # Every running service shares a common db instance
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: go_master
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB:
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_go-wallet-service:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U go_master"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # Scripts
+  # Scripts run once once all target services are up and running and healthy
+
+  # Migration script runs once on every container build. First it awaits for postgres container to be ready
+  # Then all the migrations are applied
+  migrate:
+    build:
+      context: .
+      dockerfile: scripts/migrations/Dockerfile
+    container_name: migrate
+    environment:
+      POSTGRES_DSN: "postgres://go_master:test@db:5432/go_master?sslmode=disable"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Kafka topic init script. Runs a script in separate container which waits for kafka instance to be healthy
+  # Executes with a retry to make sure connection with running kafka image is established
+  topic-init:
+    build:
+      context: .
+      dockerfile: scripts/topic/Dockerfile
+    container_name: topic-init
+    environment:
+      KAFKA_BROKERS: "kafka:29092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Redis instance for local development
+  # Every running service shares a common caching environment
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-test}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-test}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # Used by: wallet-service, auth-service (each declares its own
+    # depends_on: redis, so this service must not depend back on them)
+
+  # Redis UI for testing purposes and troubleshooting purposes
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    profiles: ["dev"]
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      - redis
+
+volumes:
+  postgres_data_go-wallet-service:
+  redis_data:
+  redisinsight_data:

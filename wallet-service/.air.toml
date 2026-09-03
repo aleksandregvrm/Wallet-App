@@ -1,0 +1,11 @@
+root = "."
+tmp_dir = "tmp/wallet-service"
+
+[build]
+  cmd = "go build -o ./tmp/wallet-service/main ./wallet-service/cmd"
+  bin = "tmp/wallet-service/main"
+  full_bin = "./tmp/wallet-service/main"
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  exclude_dir = ["tmp", "vendor", "testdata", "bin", "auth-service", "api-gateway", "node_modules"]
+  exclude_regex = ["_test.go"]
+  delay = 1000

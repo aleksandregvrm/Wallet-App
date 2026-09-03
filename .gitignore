@@ -1,0 +1,49 @@
+# Binaries and build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/build/
+
+# Go workspace/module files
+/vendor/
+go.work
+go.work.sum
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Project-specific ignores
+/tmp
+# Fake data seeding in the database
+/scripts/seed
+TASK.md
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Test / coverage
+*.cover
+coverage.out
+coverage.html
+
+# Logs
+*.log
